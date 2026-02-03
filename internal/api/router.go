@@ -550,7 +550,7 @@ func RegisterRoutes(h *server.Hertz, dt *dingtalk.Client, alertSvc *alert.Servic
 		input := planagent.Input{Date: date, Quotes: quotes}
 		plan := planagent.FallbackPlan(input)
 		mode := "fallback"
-		if planAgent != nil && qErr == nil {
+		if planAgent != nil && len(quotes) > 0 {
 			if p, err := planAgent.Evaluate(context.Background(), input); err == nil {
 				plan = p
 				mode = "llm"

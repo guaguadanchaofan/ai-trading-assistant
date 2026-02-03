@@ -35,6 +35,7 @@ func (p *SinaProvider) GetQuotes(ctx context.Context, symbols []string) ([]Quote
 	if err != nil {
 		return nil, "", fmt.Errorf("build request: %w", err)
 	}
+	req.Header.Set("Referer", "https://finance.sina.com.cn")
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("request sina: %w", err)

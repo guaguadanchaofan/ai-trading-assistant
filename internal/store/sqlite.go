@@ -71,6 +71,14 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
+	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("pragma wal: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout=3000;"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("pragma busy_timeout: %w", err)
+	}
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping sqlite: %w", err)
