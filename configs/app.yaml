@@ -1,0 +1,67 @@
+server:
+  port: 8080
+log:
+  level: "info"
+push:
+  dingtalk:
+    webhook: "https://oapi.dingtalk.com/robot/send?access_token=2781bf51cfedea75017e650c381b9f44e581400fbde34d20c469dd93f912c506"
+    secret: "SEC08f44ab8f5ca5e16a96593cc9389d778f4bdc4e7a6bafaa190a96c2a05c986ec"
+    timeout_ms: 5000
+alert:
+  rate_limit:
+    per_minute: 60
+    burst: 10
+  dedup:
+    window_sec: 60
+  merge:
+    window_sec: 30
+  digest:
+    low_interval_sec: 60
+store:
+  sqlite:
+    path: "data/app.db"
+market:
+  symbols:
+    - "sh000001"
+    - "sh600000"
+    - "sz000001"
+  poll_interval_sec: 30
+  min_request_interval_ms: 1000
+engine:
+  index_risk:
+    symbol: "sh000001"
+    med_pct: 1.5
+    high_pct: 3.0
+  panic_drop:
+    window_sec: 300
+    med_pct: 2.0
+    high_pct: 4.0
+  volume_spike:
+    ma_points: 5
+    ratio: 3.0
+  key_break_down:
+    levels:
+      sh000001: 2800
+    priority: "med"
+  window_max_keep: 200
+  cooldown_sec:
+    index_risk: 300
+    panic_drop: 180
+    volume_spike: 180
+    key_break_down: 600
+risk_agent:
+  enabled: true
+  model: "deepseek-reasoner"
+  api_key: "sk-6f32f746ac874668acaf8bf649ac31e0"
+  base_url: "https://api.deepseek.com/v1"
+  by_azure: false
+  api_version: ""
+  timeout_ms: 10000
+plan_agent:
+  enabled: false
+  model: "gpt-4.1-mini"
+  api_key: ""
+  base_url: ""
+  by_azure: false
+  api_version: ""
+  timeout_ms: 10000
