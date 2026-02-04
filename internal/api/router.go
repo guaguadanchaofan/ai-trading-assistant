@@ -2,11 +2,13 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -19,7 +21,6 @@ import (
 	"ai-trading-assistant/internal/riskagent"
 	"ai-trading-assistant/internal/store"
 
-	"database/sql"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 )
@@ -40,6 +41,16 @@ type AlertResponse struct {
 func RegisterRoutes(h *server.Hertz, dt *dingtalk.Client, alertSvc *alert.Service, st *store.Store, mkt *market.Service, defaultSymbols []string, eng *engine.Engine, agent *riskagent.Agent, planAgent *planagent.Agent) {
 	h.GET("/healthz", func(_ context.Context, c *app.RequestContext) {
 		c.JSON(200, map[string]bool{"ok": true})
+	})
+
+	h.GET("/ui", func(_ context.Context, c *app.RequestContext) {
+		data, err := os.ReadFile("internal/ui/index.html")
+		if err != nil {
+			c.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 	})
 
 	h.POST("/api/v1/test/push", func(_ context.Context, c *app.RequestContext) {
@@ -342,6 +353,7 @@ func RegisterRoutes(h *server.Hertz, dt *dingtalk.Client, alertSvc *alert.Servic
 		}
 		var req struct {
 			Symbol    string  `json:"symbol"`
+			Name      string  `json:"name"`
 			Price     float64 `json:"price"`
 			ChangePct float64 `json:"change_pct"`
 			Volume    float64 `json:"volume"`
@@ -367,6 +379,7 @@ func RegisterRoutes(h *server.Hertz, dt *dingtalk.Client, alertSvc *alert.Servic
 		snapshot := store.MarketSnapshot{
 			TS:        req.TS,
 			Symbol:    req.Symbol,
+			Name:      req.Name,
 			Price:     req.Price,
 			ChangePct: req.ChangePct,
 			Volume:    req.Volume,
@@ -484,8 +497,6 @@ func RegisterRoutes(h *server.Hertz, dt *dingtalk.Client, alertSvc *alert.Servic
 		if agent != nil {
 			if d, err := agent.Evaluate(context.Background(), input); err == nil {
 				decision = d
-			} else {
-				log.Printf("risk eval error: %v", err)
 			}
 		}
 		markdown := riskagent.FormatMarkdown(evt.Title, decision)

@@ -134,14 +134,15 @@ func (a *Agent) Evaluate(ctx context.Context, in EventInput) (RiskDecision, erro
 
 	payload, _ := json.Marshal(in)
 
-	system := `You are RiskAgent. You MUST output ONLY valid JSON.
-Rules:
-- Only risk control assessment. No buy/sell points. No profit prediction.
-- If evidence is insufficient or unclear, downgrade severity to low and risk_level to 1-2.
-- why[] and action_hint[] must each have 1-3 concise items.
-- one_liner is a single short sentence.
-- confidence is 0.0-1.0.
-- severity must be low|med|high.`
+	system := `你是 RiskAgent。你必须只输出合法 JSON。
+规则：
+- 只做风控评估，不给买入/卖出点，不预测收益。
+- 证据不足或不明确时，severity 降级为 low，risk_level 设为 1-2。
+- why[] 与 action_hint[] 各包含 1-3 条简短要点。
+- one_liner 为一句话结论。
+- 输出内容（one_liner/why/action_hint/tags）必须使用中文。
+- confidence 取值范围 0.0-1.0。
+- severity 只能是 low|med|high。`
 
 	messages := []*schema.Message{
 		schema.SystemMessage(system),
@@ -150,35 +151,38 @@ Rules:
 
 	resp, err := a.model.Generate(ctx, messages)
 	if err != nil {
-		logLLMError(err)
+		logLLMErrorOnce(err)
 		return fallbackFromEvent(in), err
 	}
 	text := strings.TrimSpace(resp.Content)
+	logLLMOutput(text)
 
 	out, err := parseRiskDecision(text)
 	if err != nil {
 		return fallbackFromEvent(in), err
 	}
-	return sanitize(out), nil
+	return sanitizeWithEvent(out, in), nil
 }
 
 func FormatMarkdown(title string, decision RiskDecision) string {
 	if title == "" {
-		title = "Risk Decision"
+		title = "风险评估"
 	}
+	sev := severityZH(decision.Severity)
 	lines := []string{
-		fmt.Sprintf("**%s**", title),
-		fmt.Sprintf("**结论**：%s (risk_level=%d, severity=%s)", decision.OneLiner, decision.RiskLevel, decision.Severity),
+		fmt.Sprintf("### %s", title),
+		fmt.Sprintf("**结论**：%s（风险等级=%d，严重度=%s）", decision.OneLiner, decision.RiskLevel, sev),
+		"",
 		"**证据**：",
 	}
 	for _, w := range decision.Why {
 		lines = append(lines, fmt.Sprintf("- %s", w))
 	}
-	lines = append(lines, "**建议动作**：")
+	lines = append(lines, "", "**建议动作**：")
 	for _, a := range decision.ActionHint {
 		lines = append(lines, fmt.Sprintf("- %s", a))
 	}
-	lines = append(lines, fmt.Sprintf("**置信度**：%.2f", decision.Confidence))
+	lines = append(lines, "", fmt.Sprintf("**置信度**：%.2f", decision.Confidence))
 	return strings.Join(lines, "\n")
 }
 
@@ -218,6 +222,38 @@ func sanitize(in RiskDecision) RiskDecision {
 	}
 	if out.Confidence > 1 {
 		out.Confidence = 1
+	}
+	out = localizeDecision(out)
+	return out
+}
+
+func sanitizeWithEvent(in RiskDecision, ev EventInput) RiskDecision {
+	out := sanitize(in)
+	needsWhy := false
+	for _, w := range out.Why {
+		if containsASCII(w) {
+			needsWhy = true
+			break
+		}
+	}
+	if needsWhy {
+		why, action := buildWhyAction(ev)
+		if len(why) > 0 {
+			out.Why = trimList(why, 3)
+		}
+		if len(action) > 0 {
+			out.ActionHint = trimList(action, 3)
+		}
+	}
+	for i, a := range out.ActionHint {
+		if containsASCII(a) {
+			zh := actionHintZH(out.Severity)
+			if i < len(zh) {
+				out.ActionHint[i] = zh[i]
+			} else {
+				out.ActionHint[i] = "保持谨慎，降低风险暴露"
+			}
+		}
 	}
 	return out
 }
@@ -276,16 +312,16 @@ func fallbackFromEvent(in EventInput) RiskDecision {
 
 	why, action := buildWhyAction(in)
 	if len(why) == 0 {
-		why = []string{"evidence provided in event payload"}
+		why = []string{"证据已包含在事件信息中"}
 	}
 	if len(action) == 0 {
-		action = []string{"monitor and reduce exposure risk"}
+		action = []string{"保持谨慎，降低风险暴露"}
 	}
 
 	return RiskDecision{
 		RiskLevel:  rl,
 		Severity:   sev,
-		OneLiner:   fmt.Sprintf("%s risk assessment based on event severity", sev),
+		OneLiner:   "基于事件严重度的风险评估",
 		Why:        trimList(why, 3),
 		ActionHint: trimList(action, 3),
 		Confidence: conf,
@@ -297,6 +333,7 @@ func buildWhyAction(in EventInput) ([]string, []string) {
 	typ := strings.ToUpper(in.Type)
 	ev := parseEvidenceMap(in.Evidence)
 	threshold := getFloat(ev["threshold"])
+	drawdownAmt := getFloat(ev["drawdown_amt"])
 
 	switch typ {
 	case "PANIC_DROP":
@@ -310,6 +347,11 @@ func buildWhyAction(in EventInput) ([]string, []string) {
 			mins = 5
 		}
 		if drawdown != 0 && threshold != 0 {
+			if drawdownAmt != 0 {
+				why := []string{fmt.Sprintf("%d分钟回撤 %.1f%%（约%.2f元，阈值 -%.1f%%）", mins, drawdown, drawdownAmt, threshold)}
+				action := []string{"优先减仓/收紧止损，避免加仓追涨", "等待止跌确认"}
+				return why, action
+			}
 			why := []string{fmt.Sprintf("%d分钟回撤 %.1f%%（阈值 -%.1f%%）", mins, drawdown, threshold)}
 			action := []string{"优先减仓/收紧止损，避免加仓追涨", "等待止跌确认"}
 			return why, action
@@ -333,16 +375,16 @@ func buildWhyAction(in EventInput) ([]string, []string) {
 func buildGenericWhy(in EventInput) []string {
 	var out []string
 	if in.ChangePct != 0 {
-		out = append(out, fmt.Sprintf("change_pct=%.2f", in.ChangePct))
+		out = append(out, fmt.Sprintf("涨跌幅=%.2f%%", in.ChangePct))
 	}
 	if in.DrawdownPct != 0 {
-		out = append(out, fmt.Sprintf("drawdown_pct=%.2f", in.DrawdownPct))
+		out = append(out, fmt.Sprintf("回撤=%.2f%%", in.DrawdownPct))
 	}
 	if in.WindowSec > 0 {
-		out = append(out, fmt.Sprintf("window_sec=%d", in.WindowSec))
+		out = append(out, fmt.Sprintf("窗口=%d秒", in.WindowSec))
 	}
 	if in.Evidence != "" && len(out) < 3 {
-		out = append(out, "evidence_json present")
+		out = append(out, "事件证据已提供")
 	}
 	return out
 }
@@ -350,12 +392,92 @@ func buildGenericWhy(in EventInput) []string {
 func buildActionFromSeverity(sev string) []string {
 	switch sev {
 	case "high":
-		return []string{"reduce exposure", "tighten risk limits", "increase monitoring frequency"}
+		return []string{"优先减仓/收紧止损，避免加仓追涨", "减少高位追涨，优先防守", "提高监控频率"}
 	case "med":
-		return []string{"monitor closely", "review positions", "tighten stop-loss rules"}
+		return []string{"控制仓位与节奏", "关注止损执行", "减少追涨行为"}
 	default:
-		return []string{"monitor and collect more signals"}
+		return []string{"持续观察", "等待确认信号", "保持风控纪律"}
 	}
+}
+
+func localizeDecision(in RiskDecision) RiskDecision {
+	out := in
+	if containsASCII(out.OneLiner) {
+		out.OneLiner = oneLinerZH(out.Severity)
+	}
+	for i, w := range out.Why {
+		if containsASCII(w) {
+			out.Why[i] = translateWhy(w)
+		}
+	}
+	for i, a := range out.ActionHint {
+		if containsASCII(a) {
+			zh := actionHintZH(out.Severity)
+			if i < len(zh) {
+				out.ActionHint[i] = zh[i]
+			} else {
+				out.ActionHint[i] = "保持谨慎，降低风险暴露"
+			}
+		}
+	}
+	if len(out.ActionHint) == 0 {
+		out.ActionHint = actionHintZH(out.Severity)
+	}
+	if len(out.Why) == 0 {
+		out.Why = []string{"证据不足，先谨慎观察"}
+	}
+	return out
+}
+
+func containsASCII(s string) bool {
+	for _, r := range s {
+		if r <= 127 && ((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')) {
+			return true
+		}
+	}
+	return false
+}
+
+func oneLinerZH(sev string) string {
+	switch strings.ToLower(sev) {
+	case "high":
+		return "风险偏高，需加强防守"
+	case "med":
+		return "风险中等，保持谨慎"
+	default:
+		return "风险较低，持续观察"
+	}
+}
+
+func severityZH(sev string) string {
+	switch strings.ToLower(sev) {
+	case "high":
+		return "高"
+	case "med":
+		return "中"
+	default:
+		return "低"
+	}
+}
+
+func actionHintZH(sev string) []string {
+	switch strings.ToLower(sev) {
+	case "high":
+		return []string{"优先减仓/收紧止损，避免加仓追涨", "减少高位追涨，优先防守", "提高监控频率"}
+	case "med":
+		return []string{"控制仓位与节奏", "关注止损执行", "减少追涨行为"}
+	default:
+		return []string{"持续观察", "等待确认信号", "保持风控纪律"}
+	}
+}
+
+func translateWhy(w string) string {
+	w = strings.ReplaceAll(w, "change_pct", "涨跌幅")
+	w = strings.ReplaceAll(w, "drawdown_pct", "回撤")
+	w = strings.ReplaceAll(w, "window_sec", "窗口秒数")
+	w = strings.ReplaceAll(w, "risk", "风险")
+	w = strings.ReplaceAll(w, "threshold", "阈值")
+	return w
 }
 
 func trimList(in []string, n int) []string {
@@ -376,6 +498,25 @@ func logLLMError(err error) {
 		return
 	}
 	log.Printf("riskagent error: %v", err)
+}
+
+var lastLLMLog time.Time
+
+func logLLMErrorOnce(err error) {
+	if time.Since(lastLLMLog) < 5*time.Second {
+		return
+	}
+	lastLLMLog = time.Now()
+	logLLMError(err)
+}
+
+func logLLMOutput(text string) {
+	const maxLen = 800
+	out := text
+	if len(out) > maxLen {
+		out = out[:maxLen] + "..."
+	}
+	log.Printf("riskagent output: %s", out)
 }
 
 func parseEvidenceMap(s string) map[string]any {

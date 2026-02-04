@@ -59,7 +59,7 @@ func (s *Service) GetQuotesWithMeta(symbols []string) ([]Quote, bool, string, in
 		if err != nil {
 			return nil, false, "", 0, nil, err
 		}
-		return cached, true, "cache", sourceTS, []string{"rate limited, served from cache"}, nil
+		return cached, true, "cache", sourceTS, []string{"请求过快，返回缓存数据"}, nil
 	}
 	s.mu.Unlock()
 
@@ -81,7 +81,7 @@ func (s *Service) GetQuotesWithMeta(symbols []string) ([]Quote, bool, string, in
 	sourceTS := maxQuoteTSLocked(cached)
 	s.mu.Unlock()
 	if cacheErr == nil {
-		return cached, true, "cache", sourceTS, []string{fmt.Sprintf("quotes fetch failed: %v", err)}, nil
+		return cached, true, "cache", sourceTS, []string{fmt.Sprintf("行情获取失败，已返回缓存：%v", err)}, nil
 	}
 
 	return nil, false, source, 0, nil, err
@@ -97,6 +97,7 @@ func (s *Service) PollAndStore(symbols []string) error {
 		snapshot := store.MarketSnapshot{
 			TS:        q.TS,
 			Symbol:    q.Symbol,
+			Name:      q.Name,
 			Price:     q.Price,
 			ChangePct: q.ChangePct,
 			Volume:    q.Volume,

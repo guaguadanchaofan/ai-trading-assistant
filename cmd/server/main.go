@@ -53,15 +53,18 @@ func main() {
 		LowDigestInterval: time.Duration(cfg.Alert.Digest.LowIntervalSec) * time.Second,
 	})
 
-	agent := riskagent.New(riskagent.Config{
-		Enabled:    cfg.RiskAgent.Enabled,
-		Model:      cfg.RiskAgent.Model,
-		APIKey:     cfg.RiskAgent.APIKey,
-		BaseURL:    cfg.RiskAgent.BaseURL,
-		ByAzure:    cfg.RiskAgent.ByAzure,
-		APIVersion: cfg.RiskAgent.APIVersion,
-		TimeoutMs:  cfg.RiskAgent.TimeoutMs,
-	})
+	var agent *riskagent.Agent
+	if cfg.RiskAgent.Enabled {
+		agent = riskagent.New(riskagent.Config{
+			Enabled:    cfg.RiskAgent.Enabled,
+			Model:      cfg.RiskAgent.Model,
+			APIKey:     cfg.RiskAgent.APIKey,
+			BaseURL:    cfg.RiskAgent.BaseURL,
+			ByAzure:    cfg.RiskAgent.ByAzure,
+			APIVersion: cfg.RiskAgent.APIVersion,
+			TimeoutMs:  cfg.RiskAgent.TimeoutMs,
+		})
+	}
 
 	planAgent := planagent.New(planagent.Config{
 		Enabled:    cfg.PlanAgent.Enabled,

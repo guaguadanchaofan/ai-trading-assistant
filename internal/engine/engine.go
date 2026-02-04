@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -182,19 +181,32 @@ func (e *Engine) rulePanicDrop(s store.MarketSnapshot, window []store.MarketSnap
 	if maxPrice <= 0 {
 		return
 	}
-	drawdownPct := (s.Price - maxPrice) / maxPrice * 100
+	drawdownAmt := s.Price - maxPrice
+	drawdownPct := drawdownAmt / maxPrice * 100
 	if drawdownPct <= -e.cfg.PanicDrop.HighPct {
 		if !e.checkCooldown("PANIC_DROP", s.Symbol, "high", e.cfg.CooldownSec.PanicDrop) {
 			return
 		}
-		e.emit("PANIC_DROP", "high", s, map[string]any{"drawdown_pct": drawdownPct, "window_sec": e.cfg.PanicDrop.WindowSec, "threshold": e.cfg.PanicDrop.HighPct})
+		e.emit("PANIC_DROP", "high", s, map[string]any{
+			"drawdown_pct": drawdownPct,
+			"drawdown_amt": drawdownAmt,
+			"max_price":    maxPrice,
+			"window_sec":   e.cfg.PanicDrop.WindowSec,
+			"threshold":    e.cfg.PanicDrop.HighPct,
+		})
 		return
 	}
 	if drawdownPct <= -e.cfg.PanicDrop.MedPct {
 		if !e.checkCooldown("PANIC_DROP", s.Symbol, "med", e.cfg.CooldownSec.PanicDrop) {
 			return
 		}
-		e.emit("PANIC_DROP", "med", s, map[string]any{"drawdown_pct": drawdownPct, "window_sec": e.cfg.PanicDrop.WindowSec, "threshold": e.cfg.PanicDrop.MedPct})
+		e.emit("PANIC_DROP", "med", s, map[string]any{
+			"drawdown_pct": drawdownPct,
+			"drawdown_amt": drawdownAmt,
+			"max_price":    maxPrice,
+			"window_sec":   e.cfg.PanicDrop.WindowSec,
+			"threshold":    e.cfg.PanicDrop.MedPct,
+		})
 	}
 }
 
@@ -304,15 +316,24 @@ func (e *Engine) emit(eventType string, severity string, s store.MarketSnapshot,
 		return
 	}
 
-	decision, err := e.evaluateRisk(eventID, evt, s, evidence)
-	if err != nil {
-		log.Printf("riskagent evaluate error: %v", err)
-	}
-	priority := alert.Priority(strings.ToLower(decision.Severity))
+	priority := alert.Priority(strings.ToLower(evt.Severity))
 	if priority != alert.PriorityHigh && priority != alert.PriorityMed {
 		priority = alert.PriorityLow
 	}
-	markdown := riskagent.FormatMarkdown(evt.Title, decision)
+	markdown := ""
+	if e.agent == nil {
+		markdown = buildRuleMarkdown(eventType, s, evidence)
+	} else {
+		decision, err := e.evaluateRisk(eventID, evt, s, evidence)
+		if err != nil {
+			log.Printf("risk eval error: %v", err)
+		}
+		priority = alert.Priority(strings.ToLower(decision.Severity))
+		if priority != alert.PriorityHigh && priority != alert.PriorityMed {
+			priority = alert.PriorityLow
+		}
+		markdown = riskagent.FormatMarkdown(evt.Title, decision)
+	}
 	alertReq := alert.AlertRequest{
 		Priority: priority,
 		Group:    "risk",
@@ -327,21 +348,46 @@ func (e *Engine) emit(eventType string, severity string, s store.MarketSnapshot,
 	}
 }
 
-func buildMarkdown(eventType string, s store.MarketSnapshot, evidence map[string]any) string {
+func buildRuleMarkdown(eventType string, s store.MarketSnapshot, evidence map[string]any) string {
+	title := buildEventTitle(eventType, s, evidence)
 	lines := []string{
-		fmt.Sprintf("**%s**", eventType),
-		fmt.Sprintf("- symbol: %s", s.Symbol),
-		fmt.Sprintf("- price: %.4f", s.Price),
-		fmt.Sprintf("- change_pct: %.4f", s.ChangePct),
-		fmt.Sprintf("- volume: %.0f", s.Volume),
+		fmt.Sprintf("### %s", title),
+		fmt.Sprintf("**价格**：%.2f", s.Price),
+		fmt.Sprintf("**涨跌幅**：%.2f%%", s.ChangePct),
 	}
-	keys := make([]string, 0, len(evidence))
-	for k := range evidence {
-		keys = append(keys, k)
+	if s.Volume > 0 {
+		lines = append(lines, fmt.Sprintf("**成交量**：%.0f", s.Volume))
 	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		lines = append(lines, fmt.Sprintf("- %s: %v", k, evidence[k]))
+	lines = append(lines, "", "**证据**：")
+	addEvidenceLine := func(label string, val string) {
+		if val == "" {
+			return
+		}
+		lines = append(lines, fmt.Sprintf("- %s：%s", label, val))
+	}
+	if v := getFloat(evidence, "drawdown_pct"); v != 0 {
+		addEvidenceLine("回撤", fmt.Sprintf("%.2f%%", v))
+	}
+	if v := getFloat(evidence, "drawdown_amt"); v != 0 {
+		addEvidenceLine("回撤金额", fmt.Sprintf("%.2f元", v))
+	}
+	if v := getInt(evidence, "window_sec"); v != 0 {
+		addEvidenceLine("窗口", fmt.Sprintf("%ds", v))
+	}
+	if v := getFloat(evidence, "change_pct"); v != 0 {
+		addEvidenceLine("指数跌幅", fmt.Sprintf("%.2f%%", v))
+	}
+	if v := getFloat(evidence, "ratio"); v != 0 {
+		addEvidenceLine("放量倍数", fmt.Sprintf("%.2f", v))
+	}
+	if v := getFloat(evidence, "avg"); v != 0 {
+		addEvidenceLine("均量参考", fmt.Sprintf("%.0f", v))
+	}
+	if v := getFloat(evidence, "level"); v != 0 {
+		addEvidenceLine("关键价", fmt.Sprintf("%.2f", v))
+	}
+	if v := getFloat(evidence, "threshold"); v != 0 {
+		addEvidenceLine("阈值", fmt.Sprintf("-%.2f%%", v))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -396,18 +442,42 @@ func getInt(m map[string]any, key string) int {
 }
 
 func buildEventTitle(eventType string, s store.MarketSnapshot, evidence map[string]any) string {
+	name := displaySymbolName(s)
 	switch eventType {
 	case "INDEX_RISK":
-		return fmt.Sprintf("%s INDEX_RISK change_pct=%.2f", s.Symbol, s.ChangePct)
+		return fmt.Sprintf("%s 指数风险 跌幅=%.2f%%", name, s.ChangePct)
 	case "PANIC_DROP":
-		if v, ok := evidence["drawdown_pct"]; ok {
-			if w, ok := evidence["window_sec"]; ok {
-				return fmt.Sprintf("%s PANIC_DROP drawdown=%v window_sec=%v", s.Symbol, v, w)
+		drawdown := getFloat(evidence, "drawdown_pct")
+		window := getInt(evidence, "window_sec")
+		amt := getFloat(evidence, "drawdown_amt")
+		if drawdown != 0 {
+			if window > 0 {
+				if amt != 0 {
+					return fmt.Sprintf("%s 恐慌下跌 回撤=%.2f%%（%.2f元） 窗口=%ds", name, drawdown, amt, window)
+				}
+				return fmt.Sprintf("%s 恐慌下跌 回撤=%.2f%% 窗口=%ds", name, drawdown, window)
 			}
-			return fmt.Sprintf("%s PANIC_DROP drawdown=%v", s.Symbol, v)
+			if amt != 0 {
+				return fmt.Sprintf("%s 恐慌下跌 回撤=%.2f%%（%.2f元）", name, drawdown, amt)
+			}
+			return fmt.Sprintf("%s 恐慌下跌 回撤=%.2f%%", name, drawdown)
 		}
+	case "VOLUME_SPIKE":
+		return fmt.Sprintf("%s 成交量异动", name)
+	case "KEY_BREAK_DOWN":
+		if v, ok := evidence["level"]; ok {
+			return fmt.Sprintf("%s 关键位跌破 关键价=%v", name, v)
+		}
+		return fmt.Sprintf("%s 关键位跌破", name)
 	}
-	return fmt.Sprintf("%s %s", s.Symbol, eventType)
+	return fmt.Sprintf("%s %s", name, eventType)
+}
+
+func displaySymbolName(s store.MarketSnapshot) string {
+	if s.Name != "" {
+		return s.Name
+	}
+	return s.Symbol
 }
 
 func isStockSymbol(sym string) bool {

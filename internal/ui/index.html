@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Trading Assistant 控制台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f1412;
+      --card: #161c19;
+      --muted: #9fb1a8;
+      --text: #e8f2ed;
+      --accent: #8be0b4;
+      --accent-2: #69c7f5;
+      --danger: #ff8f8f;
+      --border: #25302b;
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Space Grotesk", "Source Serif 4", serif;
+      color: var(--text);
+      background:
+        radial-gradient(1200px 600px at 20% -10%, rgba(139,224,180,0.18), transparent 60%),
+        radial-gradient(900px 500px at 90% 10%, rgba(105,199,245,0.15), transparent 60%),
+        linear-gradient(180deg, #0e1210, #0b100e 40%, #0d1412 100%);
+      min-height: 100vh;
+    }
+    header {
+      padding: 28px 28px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    h1 {
+      font-size: 26px;
+      font-weight: 700;
+      margin: 0;
+      letter-spacing: 0.3px;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 4px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 18px;
+      padding: 12px 28px 28px;
+    }
+    .card {
+      grid-column: span 6;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+    .card.full { grid-column: span 12; }
+    .card h2 {
+      margin: 0 0 10px;
+      font-size: 16px;
+      font-weight: 600;
+    }
+    label { font-size: 12px; color: var(--muted); display:block; margin-bottom:6px; }
+    input, textarea, select {
+      width: 100%;
+      background: #0f1512;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 14px;
+      outline: none;
+    }
+    textarea { min-height: 90px; resize: vertical; }
+    .row { display:grid; grid-template-columns: repeat(2,1fr); gap: 12px; }
+    button {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #0b100e;
+      border: none;
+      padding: 10px 14px;
+      font-weight: 600;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    pre {
+      background: #0b100e;
+      border: 1px solid var(--border);
+      color: #cfe7db;
+      padding: 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      overflow: auto;
+      max-height: 220px;
+    }
+    .status { font-size: 12px; color: var(--muted); }
+    .ok { color: var(--accent); }
+    .err { color: var(--danger); }
+    .pill {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      margin-left: 8px;
+    }
+    @media (max-width: 980px) {
+      .card { grid-column: span 12; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>AI Trading Assistant 控制台</h1>
+      <div class="sub">轻量调用台：行情 / 告警 / 风险 / 计划</div>
+    </div>
+    <div class="status" id="baseUrlHint"></div>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h2>健康检查 <span class="pill">GET /healthz</span></h2>
+      <button onclick="callHealth()">检查</button>
+      <pre id="healthOut"></pre>
+    </div>
+
+    <div class="card">
+      <h2>行情查询 <span class="pill">GET /api/v1/quotes</span></h2>
+      <label>Symbols (逗号分隔)</label>
+      <input id="quotesSymbols" placeholder="sh000001,sh600000" />
+      <button onclick="callQuotes()">查询</button>
+      <pre id="quotesOut"></pre>
+    </div>
+
+    <div class="card">
+      <h2>注入快照 <span class="pill">POST /api/v1/test/snapshot</span></h2>
+      <div class="row">
+        <div>
+          <label>Symbol</label>
+          <input id="snapSymbol" value="sh600000" />
+        </div>
+        <div>
+          <label>Price</label>
+          <input id="snapPrice" value="11.3" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Change %</label>
+          <input id="snapChange" value="-5.8" />
+        </div>
+        <div>
+          <label>Volume</label>
+          <input id="snapVol" value="800000" />
+        </div>
+      </div>
+      <button onclick="callSnapshot()">注入</button>
+      <pre id="snapOut"></pre>
+    </div>
+
+    <div class="card">
+      <h2>风险测试 <span class="pill">POST /api/v1/test/risk/ping</span></h2>
+      <button onclick="callRiskPing()">Ping</button>
+      <pre id="riskPingOut"></pre>
+    </div>
+
+    <div class="card">
+      <h2>风险评估（inline） <span class="pill">POST /api/v1/test/risk/eval</span></h2>
+      <label>Event JSON</label>
+      <textarea id="riskEvent">{"event":{"type":"PANIC_DROP","severity":"med","group":"risk","title":"sh600000 PANIC_DROP","dedup_key":"t","merge_key":"m","evidence_json":"{\"drawdown_pct\":-5.8,\"window_sec\":300,\"threshold\":3.0}"}}</textarea>
+      <button onclick="callRiskEval()">评估</button>
+      <pre id="riskEvalOut"></pre>
+    </div>
+
+    <div class="card">
+      <h2>盘前计划 <span class="pill">POST /api/v1/plan/generate</span></h2>
+      <label>Date (YYYY-MM-DD)</label>
+      <input id="planDate" />
+      <button onclick="callPlanGen()">生成</button>
+      <button class="secondary" onclick="callPlanGet()">查询</button>
+      <button class="secondary" onclick="callPlanConfirm()">确认</button>
+      <pre id="planOut"></pre>
+    </div>
+
+    <div class="card">
+      <h2>告警查询 <span class="pill">GET /api/v1/alerts</span></h2>
+      <div class="row">
+        <div>
+          <label>Date (YYYY-MM-DD)</label>
+          <input id="alertsDate" />
+        </div>
+        <div>
+          <label>Status</label>
+          <input id="alertsStatus" placeholder="sent/queued_digest" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Group</label>
+          <input id="alertsGroup" placeholder="risk/price" />
+        </div>
+        <div>
+          <label>Limit</label>
+          <input id="alertsLimit" value="20" />
+        </div>
+      </div>
+      <button onclick="callAlerts()">查询</button>
+      <pre id="alertsOut"></pre>
+    </div>
+
+    <div class="card">
+      <h2>告警去重查询 <span class="pill">GET /api/v1/alerts/dedup/{key}</span></h2>
+      <label>Dedup Key</label>
+      <input id="alertsDedupKey" placeholder="dedup-key" />
+      <button onclick="callAlertsDedup()">查询</button>
+      <pre id="alertsDedupOut"></pre>
+    </div>
+
+    <div class="card">
+      <h2>事件查询 <span class="pill">GET /api/v1/events</span></h2>
+      <div class="row">
+        <div>
+          <label>Date (YYYY-MM-DD)</label>
+          <input id="eventsDate" />
+        </div>
+        <div>
+          <label>Type</label>
+          <input id="eventsType" placeholder="PANIC_DROP" />
+        </div>
+      </div>
+      <button onclick="callEvents()">查询</button>
+      <pre id="eventsOut"></pre>
+    </div>
+
+    <div class="card">
+      <h2>快照查询 <span class="pill">GET /api/v1/snapshots</span></h2>
+      <div class="row">
+        <div>
+          <label>Symbol</label>
+          <input id="snapQuerySymbol" value="sh600000" />
+        </div>
+        <div>
+          <label>Limit</label>
+          <input id="snapQueryLimit" value="10" />
+        </div>
+      </div>
+      <button onclick="callSnapshots()">查询</button>
+      <pre id="snapQueryOut"></pre>
+    </div>
+
+    <div class="card full">
+      <h2>原始请求器</h2>
+      <div class="row">
+        <div>
+          <label>Method</label>
+          <select id="rawMethod">
+            <option>GET</option>
+            <option>POST</option>
+          </select>
+        </div>
+        <div>
+          <label>Path</label>
+          <input id="rawPath" placeholder="/api/v1/quotes" />
+        </div>
+      </div>
+      <label>Body (JSON)</label>
+      <textarea id="rawBody"></textarea>
+      <button onclick="callRaw()">发送</button>
+      <pre id="rawOut"></pre>
+    </div>
+  </div>
+
+<script>
+  const base = location.origin;
+  document.getElementById('baseUrlHint').textContent = `Base: ${base}`;
+
+  function setToday(id){
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    const day = String(d.getDate()).padStart(2,'0');
+    document.getElementById(id).value = `${y}-${m}-${day}`;
+  }
+  setToday('planDate');
+  setToday('alertsDate');
+  setToday('eventsDate');
+
+  async function req(method, path, body){
+    const opt = {method, headers: {"Content-Type":"application/json"}};
+    if(body){ opt.body = JSON.stringify(body); }
+    const res = await fetch(base + path, opt);
+    const text = await res.text();
+    return {status: res.status, text};
+  }
+
+  function show(id, res){
+    let out = `status: ${res.status}\n` + res.text;
+    document.getElementById(id).textContent = out;
+  }
+
+  async function callHealth(){ show('healthOut', await req('GET','/healthz')); }
+  async function callQuotes(){
+    const s = document.getElementById('quotesSymbols').value;
+    show('quotesOut', await req('GET', `/api/v1/quotes?symbols=${encodeURIComponent(s)}`));
+  }
+  async function callSnapshot(){
+    const body = {
+      symbol: document.getElementById('snapSymbol').value,
+      price: parseFloat(document.getElementById('snapPrice').value),
+      change_pct: parseFloat(document.getElementById('snapChange').value),
+      volume: parseFloat(document.getElementById('snapVol').value)
+    };
+    show('snapOut', await req('POST','/api/v1/test/snapshot', body));
+  }
+  async function callRiskPing(){ show('riskPingOut', await req('POST','/api/v1/test/risk/ping')); }
+  async function callRiskEval(){
+    const body = JSON.parse(document.getElementById('riskEvent').value);
+    show('riskEvalOut', await req('POST','/api/v1/test/risk/eval', body));
+  }
+  async function callPlanGen(){
+    const d = document.getElementById('planDate').value;
+    show('planOut', await req('POST', `/api/v1/plan/generate?date=${encodeURIComponent(d)}`));
+  }
+  async function callPlanGet(){
+    const d = document.getElementById('planDate').value;
+    show('planOut', await req('GET', `/api/v1/plan?date=${encodeURIComponent(d)}`));
+  }
+  async function callPlanConfirm(){
+    const d = document.getElementById('planDate').value;
+    show('planOut', await req('POST','/api/v1/plan/confirm',{date:d}));
+  }
+  async function callAlerts(){
+    const d = document.getElementById('alertsDate').value;
+    const s = document.getElementById('alertsStatus').value;
+    const g = document.getElementById('alertsGroup').value;
+    const l = document.getElementById('alertsLimit').value;
+    show('alertsOut', await req('GET', `/api/v1/alerts?date=${encodeURIComponent(d)}&status=${encodeURIComponent(s)}&group=${encodeURIComponent(g)}&limit=${encodeURIComponent(l)}`));
+  }
+  async function callAlertsDedup(){
+    const k = document.getElementById('alertsDedupKey').value;
+    show('alertsDedupOut', await req('GET', `/api/v1/alerts/dedup/${encodeURIComponent(k)}`));
+  }
+  async function callEvents(){
+    const d = document.getElementById('eventsDate').value;
+    const t = document.getElementById('eventsType').value;
+    show('eventsOut', await req('GET', `/api/v1/events?date=${encodeURIComponent(d)}&type=${encodeURIComponent(t)}`));
+  }
+  async function callSnapshots(){
+    const s = document.getElementById('snapQuerySymbol').value;
+    const l = document.getElementById('snapQueryLimit').value;
+    show('snapQueryOut', await req('GET', `/api/v1/snapshots?symbol=${encodeURIComponent(s)}&limit=${encodeURIComponent(l)}`));
+  }
+  async function callRaw(){
+    const m = document.getElementById('rawMethod').value;
+    const p = document.getElementById('rawPath').value;
+    const b = document.getElementById('rawBody').value;
+    const body = b ? JSON.parse(b) : null;
+    show('rawOut', await req(m,p,body));
+  }
+</script>
+</body>
+</html>

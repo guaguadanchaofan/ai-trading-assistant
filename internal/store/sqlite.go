@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -45,6 +46,7 @@ type EventRecord struct {
 type MarketSnapshot struct {
 	TS        int64   `json:"ts"`
 	Symbol    string  `json:"symbol"`
+	Name      string  `json:"name"`
 	Price     float64 `json:"price"`
 	ChangePct float64 `json:"change_pct"`
 	Volume    float64 `json:"volume"`
@@ -137,6 +139,7 @@ func (s *Store) migrate() error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			ts INTEGER NOT NULL,
 			symbol TEXT,
+			name TEXT,
 			price REAL,
 			change_pct REAL,
 			volume REAL,
@@ -157,6 +160,24 @@ func (s *Store) migrate() error {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
+	}
+	if err := s.addColumnIfMissing("market_snapshot", "name TEXT"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) addColumnIfMissing(table string, columnDef string) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	_, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s;", table, columnDef))
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "duplicate column name") || strings.Contains(msg, "already exists") {
+			return nil
+		}
+		return fmt.Errorf("alter table %s add column %s: %w", table, columnDef, err)
 	}
 	return nil
 }
@@ -357,9 +378,9 @@ func (s *Store) InsertMarketSnapshot(ms MarketSnapshot) error {
 		ms.CreatedAt = time.Now().Format(time.RFC3339)
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO market_snapshot (ts, symbol, price, change_pct, volume, raw, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		ms.TS, ms.Symbol, ms.Price, ms.ChangePct, ms.Volume, ms.Raw, ms.CreatedAt,
+		`INSERT INTO market_snapshot (ts, symbol, name, price, change_pct, volume, raw, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		ms.TS, ms.Symbol, ms.Name, ms.Price, ms.ChangePct, ms.Volume, ms.Raw, ms.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert market snapshot: %w", err)
@@ -380,7 +401,7 @@ func (s *Store) QueryMarketSnapshots(symbol string, limit int, offset int) ([]Ma
 	if offset < 0 {
 		offset = 0
 	}
-	query := `SELECT ts, symbol, price, change_pct, volume, raw, created_at
+	query := `SELECT ts, symbol, name, price, change_pct, volume, raw, created_at
 		FROM market_snapshot WHERE symbol = ?
 		ORDER BY ts DESC LIMIT ? OFFSET ?`
 	rows, err := s.db.Query(query, symbol, limit, offset)
@@ -391,7 +412,7 @@ func (s *Store) QueryMarketSnapshots(symbol string, limit int, offset int) ([]Ma
 	var out []MarketSnapshot
 	for rows.Next() {
 		var ms MarketSnapshot
-		if err := rows.Scan(&ms.TS, &ms.Symbol, &ms.Price, &ms.ChangePct, &ms.Volume, &ms.Raw, &ms.CreatedAt); err != nil {
+		if err := rows.Scan(&ms.TS, &ms.Symbol, &ms.Name, &ms.Price, &ms.ChangePct, &ms.Volume, &ms.Raw, &ms.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan market snapshot: %w", err)
 		}
 		out = append(out, ms)

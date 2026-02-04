@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 type SinaProvider struct {
@@ -45,7 +47,11 @@ func (p *SinaProvider) GetQuotes(ctx context.Context, symbols []string) ([]Quote
 	if err != nil {
 		return nil, "", fmt.Errorf("read sina: %w", err)
 	}
-	lines := strings.Split(string(data), "\n")
+	text, err := simplifiedchinese.GBK.NewDecoder().String(string(data))
+	if err != nil {
+		return nil, "", fmt.Errorf("decode sina gbk: %w", err)
+	}
+	lines := strings.Split(text, "\n")
 	out := make([]Quote, 0, len(symbols))
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
